@@ -58,6 +58,8 @@ private class NoBrokerTransport : MqttTransport {
         listener?.onDisconnected()
     }
 
+    override fun disconnect() = Unit
+
     override fun subscribe(topicFilter: String) = Unit
 
     override fun unsubscribe(topicFilter: String) = Unit

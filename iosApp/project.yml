@@ -51,6 +51,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         BrokerHost: $(BROKER_HOST)
+        # lan (Debug) or awsIot (Release), from Base.xcconfig: which MQTT connection BrokerConfiguration builds.
+        MqttConnection: $(MQTT_CONNECTION)
         # The Cognito managed login of this configuration's stack (dev for Debug, prod for Release), from
         # Secrets.xcconfig. The shared framework reads these keys (signInSettingsFromInfoPlist).
         CognitoUserPoolId: $(COGNITO_USER_POOL_ID)
@@ -58,7 +60,8 @@ targets:
         CognitoLoginDomain: $(COGNITO_LOGIN_DOMAIN)
         CognitoRedirectUri: $(COGNITO_REDIRECT_URI)
         # The AWS IoT connection over Cognito (identity pool, region, AWS IoT endpoint), from Secrets.xcconfig. The
-        # shared framework reads them (awsIotSettingsFromInfoPlist) when the app connects to AWS IoT (AwsIotCheck).
+        # shared framework reads them (awsIotSettingsFromInfoPlist) when the app connects to AWS IoT: always in
+        # Release, and in Debug when launched with -awsIotCheck YES (AwsIotCheck).
         CognitoIdentityPoolId: $(COGNITO_IDENTITY_POOL_ID)
         AwsRegion: $(AWS_REGION)
         AmazonIotEndpoint: $(AMAZON_IOT_ENDPOINT)

@@ -1,6 +1,7 @@
 # Sign-in and session
-**Last verified**: 2026-11-23 (kmp_cognito_login STORY-1 / PLIUS-34, app part; STORY-5 / PLIUS-42, the Apple
-revoke of account deletion; STORY-6 / PLIUS-43, the public pages)
+**Last verified**: 2026-11-25 (kmp_cognito_login STORY-1 / PLIUS-34, app part; STORY-5 / PLIUS-42, the Apple
+revoke of account deletion; STORY-6 / PLIUS-43, the public pages; STORY-2 / PLIUS-35, the MQTT connection over the
+signed-in identity)
 **Scope**: the sign-in screen, the session kept across launches, sign-out and "Delete account", on Android and iOS; the public privacy policy and account-deletion pages.
 
 ## Summary
@@ -16,8 +17,9 @@ browser and storage. Each app only draws the states: Compose in `feature/signin`
 
 The Cognito user pool, its app client and the identity providers are set up in the private repository
 `rsetkus/pliuskis-backend` (Terraform, two stacks: dev and prod). This repository holds no infrastructure code and no
-real pool ID. Sign-in does not change MQTT yet: Android Release still connects with the shared certificate, and iOS
-and Android Debug use the LAN broker.
+real pool ID. Release builds of both apps connect MQTT to AWS IoT with the signed-in identity's temporary
+credentials (see [device-discovery.md](device-discovery.md#the-release-connection-aws-iot-over-cognito)); Debug builds
+sign in too but use the LAN broker.
 
 ### How it works
 1. **Launch.** The app creates one `SessionViewModel`: on Android in `PliuskisApp` (the activity owns it), on iOS in
@@ -88,7 +90,7 @@ for the iOS release, in the GitHub environment `release`:
 | Key | Read by | Android Debug | Android Release | iOS |
 |---|---|---|---|---|
 | `COGNITO_USER_POOL_ID`, `COGNITO_APP_CLIENT_ID`, `COGNITO_LOGIN_DOMAIN`, `COGNITO_REDIRECT_URI` | sign-in | `DEBUG_COGNITO_*` (dev stack) | `COGNITO_*` (prod stack) | `COGNITO_*[config=Debug]` (dev), `[config=Release]` (prod), into Info.plist `Cognito*` |
-| `COGNITO_IDENTITY_POOL_ID`, `AWS_REGION`, `AMAZON_IOT_ENDPOINT` | the Release MQTT connection over Cognito (not read yet) | none | `COGNITO_*`, `AWS_REGION`, `AMAZON_IOT_ENDPOINT` | `[config=Release]` |
+| `COGNITO_IDENTITY_POOL_ID`, `AWS_REGION`, `AMAZON_IOT_ENDPOINT` | the Release MQTT connection over Cognito | none | `COGNITO_*`, `AWS_REGION`, `AMAZON_IOT_ENDPOINT` | `[config=Release]` |
 | `APPLE_REVOKE_API_URL`, `APPLE_SERVICES_ID` (the stack's `apple_revoke_api_url`, `apple_services_id` outputs) | the Apple revoke of account deletion | `DEBUG_APPLE_*` (dev stack) | `APPLE_*` (prod stack) | `APPLE_REVOKE_API_URL[config=Debug]`, `[config=Release]`, into Info.plist `AppleRevokeApiUrl`; no Services ID |
 
 `default.secrets.properties` and `Secrets.template.xcconfig` list every key with dummy values. With dummy values the
@@ -183,9 +185,9 @@ settings: the admin can't revoke the user's Apple tokens, which needs a fresh au
   sign-in answers an old one as cancelled.
 - **Offline launch stays signed in.** Only a rejected refresh token signs the user out at launch; a failed refresh for
   any other reason keeps the stored tokens (the next refresh may succeed).
-- **Sign-out does not touch MQTT yet.** The MQTT client is an app-wide singleton on the shared certificate or LAN
-  broker, not tied to the identity. Reconnecting under the signed-in identity belongs to the Cognito MQTT connection
-  (PLIUS-35).
+- **Sign-out closes the release MQTT connection.** The release client connects as the signed-in identity
+  (`<identity ID>-<install suffix>`); signing out closes its connection and no attempt is made until someone signs in
+  again, then as that account's identity. The Debug build's LAN broker connection is not tied to the identity.
 - **Tests use a fake signed-in session.** Android UI tests override `Authenticator` and `TokenStore` in Koin
   (`loadKoinModules`, as in `AppSignInFakes.kt`). iOS UI tests use `-uiTestScenario`: the `signIn*` scenarios show the
   sign-in screen in a fixed state, `signedInLive` the live device list without sign-in, and the device and control

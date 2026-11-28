@@ -40,6 +40,8 @@
 	<string>$(COGNITO_USER_POOL_ID)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>MqttConnection</key>
+	<string>$(MQTT_CONNECTION)</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Pliuskis connects to the MQTT broker on your local network to find your plant devices, show their status and water them.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -42,7 +42,8 @@ import org.koin.dsl.module
  * With [awsIot], the MQTT client connects to AWS IoT over Cognito: [AwsIotCredentialsCache] holds the signed-in
  * identity's temporary credentials and signs the WebSocket URL of every attempt (the Swift transport asks it), and the
  * client ID of an attempt is `<identity ID>-<install suffix>`, where the install suffix is the client ID of the
- * [MqttSettings]. Without it, the client connects to the settings' broker with their client ID, as before.
+ * [MqttSettings]. A refused connection (no AWS IoT access) makes the next attempt get new credentials, and a sign-out
+ * closes the connection. Without it, the client connects to the settings' broker with their client ID, as before.
  */
 fun iosDataModule(
     transport: MqttTransport,
@@ -67,10 +68,9 @@ fun iosDataModule(
             IosMqttClientManager(
                 transport = transport,
                 settings = settings,
-                clientIdForAttempt = {
-                    credentials.prepare()?.let { identityId -> "$identityId-${settings.clientId}" }
-                },
-            )
+                clientIdForAttempt = { credentials.clientIdForAttempt(settings.clientId) },
+                onRefused = credentials::invalidateCredentials,
+            ).also { manager -> credentials.onSignOut(manager::closeConnection) }
         }
     }
     single<NetworkConnectivity> { IosNetworkConnectivity(pathSource) }

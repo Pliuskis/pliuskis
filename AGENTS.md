@@ -190,6 +190,18 @@ build-logic/           — Gradle convention plugins (application, library, feat
 **Use Cases** — every business operation is a use case implementing `BaseUseCase<T, R>`. They return `Flow<Either<Throwable, R>>` using Arrow-kt for error handling.
 
 **IoT/MQTT** — `IotManager` is the abstract interface (commonMain); `HiveMqttClientManager` is the HiveMQ implementation (androidMain). On iOS the socket is CocoaMQTT (Swift, SwiftPM, pinned in `iosApp/project.yml`): `CocoaMqttTransport` (`iosApp`) implements the Kotlin `MqttTransport` protocol and is passed to `initShared`; `IosMqttClientManager` (`core/data` iosMain, `internal`) implements `IotManager` over it and owns the contract logic (one connect attempt, the 10 s wait, re-subscribe after every CONNACK, unsubscribe on cancel, topic matching, UTF-8, publish waits for the PUBACK). `iosDataModule(transport)` binds it, and `NetworkConnectivity` to `IosNetworkConnectivity` over `NWPathMonitor`. `app`'s `brokerModule` picks the debug or production `MqttSettings` from `BuildConfig` and passes them to `core/data` through Koin; `core/data` reads no `BuildConfig`. Device communication is message-based via MQTT topics.
+Release builds of both apps connect to AWS IoT (prod stack) with the signed-in user's Cognito identity, with no
+certificate: `MqttSettings` with `TlsMode.WEBSOCKET_SIGV4` (`wss://<endpoint>:443/mqtt`, client ID `<identity
+ID>-<install suffix>`) and `AwsIotSettings` (identity pool, region, endpoint). `AwsIotCredentialsCache` (`core/data`
+commonMain, plain HTTPS to the identity pool) keeps the temporary credentials fresh, and `signAwsIotWebSocketUrl`
+(commonMain) signs a new SigV4 URL (service `iotdevicegateway`, session token appended) for every connect and every
+automatic reconnect. On iOS the WebSocket transport (`CocoaMqttTransport(webSocketUrlProvider:)`) asks for a URL on
+every attempt; the Kotlin `MqttTransport` has `disconnect()` and its listener `onConnectionRefused()`. On Android
+`AwsIotMqttClientManager` runs HiveMQ's reconnects through its reconnector and connects through
+`SignedWebSocketRelay` (127.0.0.1), because HiveMQ re-escapes a signed query. An identity without AWS IoT access gets
+`MqttConnectionState.REFUSED` (`IotAccessDeniedException`): the device list is empty, and nothing retries on its own.
+Debug builds sign in (dev stack) but keep the LAN broker: plaintext, port 1883, no credentials, no signing. Details:
+`docs/features/device-discovery.md`.
 
 **Sign-in and session** — Google and Apple through the Cognito user pool's managed login, on both apps and both build
 types (see `docs/features/sign-in.md`). `core/domain` has the ports `Authenticator` and `TokenStore` and the use cases
@@ -206,8 +218,12 @@ sign-in or the device list from the session state; the device list's account men
 **State management** — ViewModels live in `core/presentation` (commonMain, the multiplatform `androidx.lifecycle.ViewModel`) and expose `StateFlow`; UI state sealed classes follow the `Loading / Success / Error` pattern (e.g., `DevicesListScreenState`). A ViewModel gets its arguments through its constructor (e.g. `ControlViewModel(deviceId, ...)`); on Android the list-detail layout passes the selected device's id to `ControlPane`, which passes it with Koin `parametersOf`. UI state holds meanings, not display text (e.g. `HumidityStatus.THIRSTY`); each platform maps them to its own text.
 
 **Swift API (`shared`)** — Swift calls `initShared(settings, transport)` once (it starts Koin; a second call does nothing),
-with `MqttSettings` from `BrokerConfiguration` (host from `BROKER_HOST` of the xcconfig, via Info.plist) and the
-per-install client ID from `installClientId()` (kept in UserDefaults), then
+with `MqttSettings` from `BrokerConfiguration` and the per-install client ID from `installClientId()` (kept in
+UserDefaults). The Info.plist key `MqttConnection` (`MQTT_CONNECTION` of `Base.xcconfig`) picks the connection: in
+Debug (`lan`) the LAN broker, host from `BROKER_HOST` of the xcconfig, with `initShared`; in Release (`awsIot`) AWS
+IoT, the endpoint `AMAZON_IOT_ENDPOINT`, with `initSharedOverAwsIot(settings, transport, tokenPlacement)` and a
+`CocoaMqttTransport(webSocketUrlProvider: AwsIotWebSocketUrlProvider())`, which signs each attempt's URL through
+`signedAwsIotWebSocketUrl()` (a Debug build does the same when launched with `-awsIotCheck YES`). It then
 creates ViewModels with `createDevicesViewModel()`, `createControlViewModel(deviceId)`,
 `createNetworkStatusViewModel()` (the offline banner state; Android keeps it app-level in `PliuskisAppState`),
 `createSignInViewModel()` and `createSessionViewModel()` (the app's session, owned by `LiveSession`). `initShared`

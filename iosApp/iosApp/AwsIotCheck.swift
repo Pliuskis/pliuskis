@@ -1,9 +1,9 @@
 import Foundation
 import Shared
 
-/// The opt-in to AWS IoT over Cognito, for the checks against AWS IoT (STORY-4, PLIUS-37), in Debug and Release
-/// builds (owner decision, 2026-11-23). Without it the app uses the LAN broker (`BROKER_HOST`, plaintext, port 1883),
-/// as always; a TestFlight install can't get launch arguments, so it always does.
+/// The opt-in to AWS IoT over Cognito for a Debug build (the dev stack), for checks against AWS IoT. Release builds
+/// always connect to AWS IoT (`BrokerConfiguration`, `MqttConnection` = `awsIot`); without the argument a Debug build
+/// uses the LAN broker (`BROKER_HOST`, plaintext, port 1883).
 ///
 /// Launch arguments (the argument domain of the standard UserDefaults):
 /// - `-awsIotCheck YES`: connect to this configuration's AWS IoT endpoint (`AMAZON_IOT_ENDPOINT`: the dev stack for

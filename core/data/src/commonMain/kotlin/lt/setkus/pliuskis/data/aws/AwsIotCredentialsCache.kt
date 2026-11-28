@@ -42,7 +42,9 @@ class StaleAwsCredentialsException : Exception("No fresh AWS credentials to sign
  *   [CREDENTIALS_SIGNING_MARGIN_SECONDS], it starts a refresh and throws [StaleAwsCredentialsException], so that
  *   attempt fails and the client's next automatic reconnect signs with the new credentials.
  * - Signing out (the [TokenStore] has no tokens) drops the cached identity and credentials, so no later attempt is
- *   signed for the old identity.
+ *   signed for the old identity, and runs the [onSignOut] actions (the MQTT client closes the old identity's
+ *   connection).
+ * - After AWS IoT refused a connection ([invalidateCredentials]), the next attempt gets new credentials.
  *
  * Nothing here logs a token, a credential or a URL; a refresh logs only the new credentials' expiry and a short
  * fingerprint of their access key ID.
@@ -64,20 +66,53 @@ class AwsIotCredentialsCache internal constructor(
     @Volatile
     private var snapshot: Snapshot? = null
 
+    /** Registered once by each MQTT client when it is created, so a plain copy-on-write list is enough. */
+    @Volatile
+    private var signOutActions: List<() -> Unit> = emptyList()
+
     init {
         scope.launch {
-            tokenStore.observe().collect { tokens -> if (tokens == null) snapshot = null }
+            tokenStore.observe().collect { tokens ->
+                if (tokens == null) {
+                    snapshot = null
+                    signOutActions.forEach { it() }
+                }
+            }
         }
     }
 
     /**
      * Makes sure fresh credentials are cached and returns the identity ID they belong to, or null when no one is
-     * signed in or Cognito gives no credentials (no network, refused session); the connect attempt then fails.
+     * signed in or Cognito gives no credentials (no network, refused session); the connect attempt then fails. No
+     * Cognito call is made when no one is signed in.
      */
     suspend fun prepare(): String? = refreshLock.withLock {
+        val signedIn = tokenStore.observe().first() != null
+        if (!signedIn) snapshot = null
         val current = snapshot?.takeIf { it.credentials.validFor(CREDENTIALS_REFRESH_MARGIN_SECONDS) }
         val stillUsable = { snapshot?.takeIf { it.credentials.validFor(CREDENTIALS_SIGNING_MARGIN_SECONDS) } }
-        (current ?: fetch() ?: stillUsable())?.identityId
+        if (signedIn) (current ?: fetch() ?: stillUsable())?.identityId else null
+    }
+
+    /**
+     * The client ID of the next AWS IoT connect attempt, `<identity ID>-<install suffix>`, after [prepare] has made
+     * the credentials fresh; null when the attempt can't be made: no one is signed in, Cognito gives no credentials, or
+     * the stack's settings are incomplete (no endpoint, for example).
+     */
+    suspend fun clientIdForAttempt(installSuffix: String): String? =
+        if (settings.isComplete) prepare()?.let { identityId -> "$identityId-$installSuffix" } else null
+
+    /**
+     * AWS IoT refused a connection with the cached credentials (the identity had no AWS IoT policy): forget them, so
+     * the next attempt gets new ones from Cognito. The identity ID stays.
+     */
+    fun invalidateCredentials() {
+        snapshot = snapshot?.let { Snapshot(it.identityId, it.credentials.expired()) }
+    }
+
+    /** Runs [action] each time the user signs out (the stored session is cleared). */
+    fun onSignOut(action: () -> Unit) {
+        signOutActions = signOutActions + action
     }
 
     /** A URL signed now with the cached credentials; see the class description for when it throws. */
@@ -109,20 +144,8 @@ class AwsIotCredentialsCache internal constructor(
         val tokens = tokenStore.observe().first()
         val fetched = tokens?.let { Either.catch { fetchFor(it) }.getOrNull() }
         snapshot = if (tokens == null) null else fetched ?: snapshot
-        fetched?.let { logRefreshed(it.credentials) }
+        fetched?.let { log.logRefreshed(it.credentials) }
         return fetched
-    }
-
-    /**
-     * Logs that new credentials are cached: their expiry and a short fingerprint (the first hex characters of the
-     * access key ID's SHA-256), so a check can tell two credentials apart. No part of the access key ID, the secret key
-     * or the session token is logged.
-     */
-    private fun logRefreshed(credentials: AwsCredentials) {
-        val fingerprint = sha256(credentials.accessKeyId.encodeToByteArray())
-            .joinToString("") { byte -> (byte.toInt() and BYTE_MASK).toString(HEX_RADIX).padStart(2, '0') }
-            .take(KEY_FINGERPRINT_LENGTH)
-        log.i { "AWS IoT credentials refreshed: key #$fingerprint, expire at ${credentials.expiresAtEpochSeconds}" }
     }
 
     private suspend fun fetchFor(tokens: AuthTokens): Snapshot =
@@ -141,4 +164,20 @@ class AwsIotCredentialsCache internal constructor(
     }
 
     private fun AwsCredentials.validFor(seconds: Long): Boolean = expiresAtEpochSeconds - now() > seconds
+}
+
+/** The same credentials, marked as expired, so they are never used again. */
+private fun AwsCredentials.expired(): AwsCredentials =
+    AwsCredentials(accessKeyId, secretAccessKey, sessionToken, expiresAtEpochSeconds = 0)
+
+/**
+ * Logs that new credentials are cached: their expiry and a short fingerprint (the first hex characters of the access
+ * key ID's SHA-256), so a check can tell two credentials apart. No part of the access key ID, the secret key or the
+ * session token is logged.
+ */
+private fun Logger.logRefreshed(credentials: AwsCredentials) {
+    val fingerprint = sha256(credentials.accessKeyId.encodeToByteArray())
+        .joinToString("") { byte -> (byte.toInt() and BYTE_MASK).toString(HEX_RADIX).padStart(2, '0') }
+        .take(KEY_FINGERPRINT_LENGTH)
+    i { "AWS IoT credentials refreshed: key #$fingerprint, expire at ${credentials.expiresAtEpochSeconds}" }
 }

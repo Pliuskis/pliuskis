@@ -93,12 +93,14 @@ private final class CountingWebSocketUrlProvider: MqttWebSocketUrlProvider {
 private final class Story4TransportListener: NSObject, MqttTransportListener {
     private let lock = NSLock()
     private var disconnected = 0
+    private var refused = 0
 
     var disconnectedCount: Int { lock.withLock { disconnected } }
 
     func onConnecting() {}
     func onConnected() {}
     func onDisconnected() { lock.withLock { disconnected += 1 } }
+    func onConnectionRefused() { lock.withLock { refused += 1 } }
     func onMessage(topic: String, payload: Data) {}
     func onPublishAcknowledged(messageId: Int32) {}
 }

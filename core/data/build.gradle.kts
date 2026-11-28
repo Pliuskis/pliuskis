@@ -17,6 +17,8 @@ kotlin {
             // androidDataModule uses androidContext().
             implementation(libs.koin)
             implementation(libs.hiveMqClient)
+            // MQTT over WebSocket for the release connection to AWS IoT (Netty's HTTP codec).
+            implementation(project.dependencies.platform(libs.hiveMqClient.websocket))
             implementation(libs.ktor.client.android)
             // The managed login opens in a Custom Tab.
             implementation(libs.androidx.browser)
@@ -29,6 +31,10 @@ kotlin {
         }
         named("androidHostTest").dependencies {
             implementation(libs.mockk)
+            // The fake AWS IoT broker of the release client tests (MQTT over WebSocket in the test JVM). HiveMQ's
+            // WebSocket platform puts netty-codec-http on the runtime classpath only; the broker compiles against it.
+            implementation(libs.netty.codec.mqtt)
+            implementation(libs.netty.codec.http)
         }
     }
 }

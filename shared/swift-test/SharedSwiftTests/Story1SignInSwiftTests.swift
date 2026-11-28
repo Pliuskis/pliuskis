@@ -36,6 +36,7 @@ private final class NoBrokerTransport: NSObject, MqttTransport {
         listener?.onDisconnected()
     }
 
+    func disconnect() {}
     func subscribe(topicFilter: String) {}
 
     func unsubscribe(topicFilter: String) {}

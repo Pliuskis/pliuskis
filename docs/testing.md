@@ -192,6 +192,16 @@ below, and ktlint and detekt over `src/commonMain`, `src/androidMain`, `src/iosM
 - **Generated sources:** KSP writes the Kotest entry points to `build/generated/ksp`. The plugin keeps `build/` out
   of ktlint, so generated code isn't linted.
 
+### The release MQTT client on Android (fake AWS IoT)
+The Android tests of the release client (`Story2AndroidAwsIotClientTest`, `core/data/src/androidHostTest`) need no
+broker outside the test: `FakeAwsIotBroker` is a small MQTT 3.1.1 over WebSocket broker in the test JVM (Netty, with
+`netty-codec-mqtt`, a test dependency), listening on a free localhost port. It records each upgrade request's URI
+(the signed query) and each CONNECT's client ID, and plays AWS IoT's answers: accept, close after the CONNECT
+(an identity without access) or answer the upgrade with HTTP 403; `stop()` then `start()` is a broker restart. The
+production client connects to it through its relay in plain `ws://`. The identity pool is a Ktor `MockEngine`
+(`FakeCognitoIdentityPool`, `core/data/src/commonTest/.../aws/AwsIotTestFixtures.kt`), and a `FakeClock` sets the
+signing time of every URL.
+
 ### The `shared` module and Swift tests
 
 `shared` builds the iOS framework `Shared` and holds the Swift-facing API (`initShared`, the ViewModel factories) in
@@ -248,6 +258,10 @@ AGENTS.md § CI) runs no tests.
   nc -z localhost 1883 && echo "broker up"
   # afterwards: pkill -f pliuskis-mosquitto.conf
   ```
+- **WebSocket transport (`iosAppTests`):** `Story2WebSocketBrokerContractTests` drives `CocoaMqttTransport` over
+  MQTT over WebSocket against `FakeWebSocketMqttBroker`, a small MQTT 3.1.1 over WebSocket broker inside the test
+  process (Network.framework, a free localhost port), so it needs no broker outside the test. It records each
+  CONNECT's client ID; `restart()` closes every connection and listens again on the same port.
 - **UI (`iosAppUITests`):** XCUITest against the launched app. Find elements by accessibility identifier
   (`.accessibilityIdentifier(...)` in the app).
 - **UI test scenarios:** a screen test that needs a fixed state launches the app with `-uiTestScenario <name>`
